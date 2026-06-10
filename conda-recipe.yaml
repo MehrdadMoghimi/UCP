@@ -1,0 +1,20 @@
+name: UCP
+channels:
+  - pytorch
+  - nvidia
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.10
+  - pip
+  - numpy>=1.25
+  - tensorboard>=2.12
+  - tqdm>=4.65
+  - pip:
+    - torch>=2.7
+    - safety-gymnasium>=0.4.1
+    - torchrl>=0.6.0
+    - tensordict>=0.5.0
+    - tyro>=0.7.3
+    - wandb>=0.15
+    - torch-tb-profiler

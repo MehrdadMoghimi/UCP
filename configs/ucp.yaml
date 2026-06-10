@@ -1,0 +1,136 @@
+# Environment-specific hyperparameter defaults for ucp.py
+# CLI arguments override these values. Format: env_id -> {param: value}
+
+defaults: &defaults
+  # Shared across safety navigation and safety velocity
+  initial_cost_stock: 0.0
+  policy_frequency: 2
+  add_cost_stock: true
+  compile: true
+  cudagraphs: true
+  save_model: true
+  save_freq: 1000000
+  evaluation_episodes: 1000
+  n_quantiles: 100
+  policy_lr: 3e-4
+  batch_size: 256
+  qf_max_grad_norm: 0.05
+  cost_qf_max_grad_norm: 0.05
+  lagrange_warmup_steps: 50000
+  lambda_lr: 5e-5
+  sample_initial_cost_stock: true
+  eval_initial_cost_stocks: [-25, -15, -5, 0]
+  cost_stock_min: -30
+  cost_stock_max: 0
+  contextual_lambda_bins: 31
+  learning_starts: 30000
+  gamma_cost: 1.0
+  lagrangian_utility_type: abs
+  cost_utility_type: abs
+  lagrangian_utility_epsilon: 1e-6
+
+velocity_defaults: &velocity_defaults
+  <<: *defaults
+  gamma: 0.99
+  total_timesteps: 1000000
+  buffer_size: 1000000
+  q_lr: 1e-4
+  c_lr: 1e-4
+  lagrangian_multiplier_init: 10.0
+  n_step: 1
+  actor_max_grad_norm: 10.0
+  cost_normalizer: 1.0
+  alpha: 0.5
+  alpha_lr: 5e-6
+  autotune: true
+
+
+navigation_defaults: &navigation_defaults
+  <<: *defaults
+  gamma: 0.999
+  total_timesteps: 3000000
+  buffer_size: 3000000
+  q_lr: 3e-5
+  c_lr: 3e-5
+  lagrangian_multiplier_init: 1.0
+  n_step: 10
+  actor_max_grad_norm: 1.0
+  cost_normalizer: 10.0
+
+SafetyAntVelocity-v1:
+  <<: *velocity_defaults
+
+SafetyHalfCheetahVelocity-v1:
+  <<: *velocity_defaults
+
+SafetyHopperVelocity-v1:
+  <<: *velocity_defaults
+
+SafetyHumanoidVelocity-v1:
+  <<: *velocity_defaults
+  total_timesteps: 3000000
+  buffer_size: 3000000
+
+SafetySwimmerVelocity-v1:
+  <<: *velocity_defaults
+  gamma: 0.995
+
+SafetyWalker2dVelocity-v1:
+  <<: *velocity_defaults
+
+SafetyCarGoal1-v0:
+  <<: *navigation_defaults
+
+SafetyCarGoal2-v0:
+  <<: *navigation_defaults
+
+SafetyCarCircle1-v0:
+  <<: *navigation_defaults
+  cost_normalizer: 100.0
+
+SafetyCarCircle2-v0:
+  <<: *navigation_defaults
+  cost_normalizer: 100.0
+
+SafetyCarPush1-v0:
+  <<: *navigation_defaults
+
+SafetyCarPush2-v0:
+  <<: *navigation_defaults
+
+SafetyCarButton1-v0:
+  <<: *navigation_defaults
+
+SafetyCarButton2-v0:
+  <<: *navigation_defaults
+
+SafetyPointGoal1-v0:
+  <<: *navigation_defaults
+
+SafetyPointGoal2-v0:
+  <<: *navigation_defaults
+
+SafetyPointCircle1-v0:
+  <<: *navigation_defaults
+  cost_normalizer: 100.0
+
+SafetyPointCircle2-v0:
+  <<: *navigation_defaults
+  cost_normalizer: 100.0
+
+SafetyPointPush1-v0:
+  <<: *navigation_defaults
+
+SafetyPointPush2-v0:
+  <<: *navigation_defaults
+
+SafetyPointButton1-v0:
+  <<: *navigation_defaults
+
+SafetyPointButton2-v0:
+  <<: *navigation_defaults
+
+
+
+
+  
