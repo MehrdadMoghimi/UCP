@@ -30,7 +30,44 @@ import safety_gymnasium as gym
 import torch
 import tqdm
 
-from utils.multi_cost_wrappers import MultiCostAugmentedObservation, MultiCostWrapper
+from utils.multi_cost_wrappers import (
+    MultiCostAugmentedObservation,
+    MultiCostWrapper,
+    broadcast_to_costs,
+)
+
+
+def _normalize_initial_cost_stocks(initial_cost_stocks: list) -> list:
+    """Convert a scalar/vector sweep to JSON-safe floats while preserving dimension order."""
+    normalized = []
+    for index, stock in enumerate(initial_cost_stocks):
+        array = np.asarray(stock, dtype=np.float64)
+        if array.ndim == 0:
+            normalized.append(float(array))
+        elif array.ndim == 1:
+            if array.size == 0:
+                raise ValueError(f"initial_cost_stocks[{index}] must not be empty")
+            normalized.append([float(value) for value in array])
+        else:
+            raise ValueError(
+                f"initial_cost_stocks[{index}] must be a scalar or one-dimensional vector"
+            )
+    return normalized
+
+
+def _stock_result_key(stock) -> float | str:
+    """Return a stable, collision-free result key for a scalar or vector stock."""
+    if np.isscalar(stock):
+        # Preserve the evaluator's historical in-memory scalar keys.
+        return float(stock)
+    return json.dumps([float(value) for value in stock], separators=(",", ":"))
+
+
+def _stock_label(stock) -> str:
+    """Format a stock for progress output and summary tables."""
+    if np.isscalar(stock):
+        return f"{float(stock):g}"
+    return "[" + ", ".join(f"{float(value):g}" for value in stock) + "]"
 
 
 def _load_evaluation_cache(cache_path: Path, eval_params: dict) -> dict:
@@ -322,20 +359,17 @@ def evaluate_ucp_multicost_multi_stock(
         Dictionary with ``per_stock_results`` (keyed by budget), ``aggregate``,
         ``initial_cost_stocks``, ``cost_names`` and ``gamma``.
     """
+    normalized_stocks = _normalize_initial_cost_stocks(initial_cost_stocks)
     eval_params = {
         "eval_episodes_per_stock": eval_episodes_per_stock,
-        "initial_cost_stocks": [
-            sorted(np.atleast_1d(s).tolist()) if not np.isscalar(s) else float(s)
-            for s in initial_cost_stocks
-        ],
+        "initial_cost_stocks": normalized_stocks,
         "evaluation_temperature": evaluation_temperature,
         "multi_stock": True,
         "multi_cost": True,
     }
 
-    stock_str = "_".join(f"{np.mean(s):.1f}" for s in initial_cost_stocks)
     param_hash = hashlib.md5(
-        f"multi_stock_{stock_str}_eps{eval_episodes_per_stock}_temp_{evaluation_temperature}".encode()
+        json.dumps(eval_params, sort_keys=True, separators=(",", ":")).encode()
     ).hexdigest()[:8]
     model_path_obj = Path(model_path)
     _cache_dir = Path(cache_dir) if cache_dir is not None else model_path_obj.parent
@@ -351,12 +385,20 @@ def evaluate_ucp_multicost_multi_stock(
     env, actor, args, cost_names, num_costs, device = _build_env_and_actor(
         model_path, sample_initial_cost_stock=False
     )
+    for index, stock in enumerate(normalized_stocks):
+        try:
+            # Validate vectors before starting any episodes. Scalars remain supported
+            # and are broadcast to all dimensions by the observation wrapper.
+            broadcast_to_costs(stock, num_costs, f"initial_cost_stocks[{index}]")
+        except ValueError:
+            env.close()
+            raise
 
     print(f"\n{'='*70}")
     print(f"Multi-Stock Evaluation (multi-cost)")
     print(f"Model: {model_path}")
     print(f"Cost dimensions: {cost_names}")
-    print(f"Initial cost stocks: {initial_cost_stocks}")
+    print(f"Initial cost stocks: {normalized_stocks}")
     print(f"Episodes per stock: {eval_episodes_per_stock}")
     print(f"{'='*70}\n")
 
@@ -364,21 +406,21 @@ def evaluate_ucp_multicost_multi_stock(
     all_returns, all_costs, all_native_costs = [], [], []
     all_discounted_returns, all_discounted_costs, all_discounted_native_costs = [], [], []
 
-    for initial_stock in initial_cost_stocks:
-        print(f"\nEvaluating with initial_cost_stock = {initial_stock}")
+    for initial_stock in normalized_stocks:
+        stock_label = _stock_label(initial_stock)
+        print(f"\nEvaluating with initial_cost_stock = {stock_label}")
 
         (returns, costs, native_costs,
          discounted_returns, discounted_costs, discounted_native_costs) = _run_episodes(
             env, actor, device, args.gamma, num_costs, eval_episodes_per_stock,
-            evaluation_temperature, f"Stock={initial_stock}",
+            evaluation_temperature, f"Stock={stock_label}",
             reset_options={"initial_cost_stock": initial_stock},
         )
 
         stock_results = _summarize(returns, costs, native_costs,
                                    discounted_returns, discounted_costs, discounted_native_costs)
-        # Scalar sweeps keep float keys (matching the single-cost evaluator);
-        # per-dimension sweeps are keyed by their mean budget.
-        per_stock_results[float(np.mean(initial_stock))] = stock_results
+        stock_results["initial_cost_stock"] = initial_stock
+        per_stock_results[_stock_result_key(initial_stock)] = stock_results
 
         all_returns.extend(returns)
         all_costs.append(costs)
@@ -414,10 +456,10 @@ def evaluate_ucp_multicost_multi_stock(
     )
     print(header)
     print("-" * len(header))
-    for stock in sorted(per_stock_results.keys()):
-        res = per_stock_results[stock]
+    for res in per_stock_results.values():
+        stock_label = _stock_label(res["initial_cost_stock"])
         per_dim = " | ".join(f"{v:>14.2f}" for v in res["mean_cost_per_dim"])
-        print(f"{stock:>15.1f} | {res['mean_return']:>8.2f} ± {res['std_return']:<8.2f} | "
+        print(f"{stock_label:>15} | {res['mean_return']:>8.2f} ± {res['std_return']:<8.2f} | "
               f"{res['mean_native_cost']:>8.2f} ± {res['std_native_cost']:<8.2f} | {per_dim}")
     print("-" * len(header))
     agg_per_dim = " | ".join(f"{v:>14.2f}" for v in aggregate["mean_cost_per_dim"])
@@ -428,10 +470,7 @@ def evaluate_ucp_multicost_multi_stock(
     results = {
         "per_stock_results": per_stock_results,
         "aggregate": aggregate,
-        "initial_cost_stocks": [
-            float(s) if np.isscalar(s) else [float(v) for v in np.atleast_1d(s)]
-            for s in initial_cost_stocks
-        ],
+        "initial_cost_stocks": normalized_stocks,
         "cost_names": cost_names,
         "gamma": float(args.gamma),
     }

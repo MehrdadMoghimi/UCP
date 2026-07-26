@@ -36,7 +36,7 @@ import math
 import random
 import time
 from collections import deque
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from functools import partial
 from typing import Optional
 
@@ -190,6 +190,10 @@ class Args:
     eval_initial_cost_stocks: list[float] = None
     """list of initial cost stock values to evaluate with (e.g., [-25, -20, -15, -10, -5, 0]).
     Each value is applied to every cost dimension; if None, uses initial_cost_stock"""
+    eval_initial_cost_stock_vector: tyro.conf.UseAppendAction[list[list[float]]] = field(default_factory=list)
+    """explicit per-dimension evaluation stocks. Repeat the flag once per evaluation
+    condition, e.g. --eval-initial-cost-stock-vector -25 -300
+    --eval-initial-cost-stock-vector -15 -200. Overrides eval_initial_cost_stocks."""
     cost_normalizer: float = 10.0
     """Normalization factor for cost stock in observations"""
     cost_stock_min: float = -30.0
@@ -1689,13 +1693,18 @@ if __name__ == "__main__":
     
     # Evaluation
     if args.evaluation_episodes > 0 and args.save_model:
+        evaluation_stocks = (
+            args.eval_initial_cost_stock_vector
+            if args.eval_initial_cost_stock_vector
+            else args.eval_initial_cost_stocks
+        )
         # Check if multi-stock evaluation is requested
-        if args.eval_initial_cost_stocks is not None and len(args.eval_initial_cost_stocks) > 0:
+        if evaluation_stocks is not None and len(evaluation_stocks) > 0:
             # Multi-stock evaluation: evaluate with each initial cost stock value
             eval_results = evaluate_ucp_multicost_multi_stock(
                 model_save_path,
                 eval_episodes_per_stock=args.evaluation_episodes,
-                initial_cost_stocks=args.eval_initial_cost_stocks,
+                initial_cost_stocks=evaluation_stocks,
                 evaluation_temperature=args.evaluation_temperature,
             )
 
@@ -1713,7 +1722,9 @@ if __name__ == "__main__":
 
                 # Log per-stock results
                 for stock, res in eval_results['per_stock_results'].items():
-                    stock_tag = f"stock_{stock:.1f}".replace('.', '_').replace('-', 'n')
+                    stock_values = np.atleast_1d(res["initial_cost_stock"])
+                    stock_tag = "stock_" + "_".join(f"{float(value):g}" for value in stock_values)
+                    stock_tag = stock_tag.replace('.', '_').replace('-', 'n')
                     writer.add_scalar(f"eval_per_stock/{stock_tag}/mean_return", res['mean_return'], global_step)
                     writer.add_scalar(f"eval_per_stock/{stock_tag}/mean_cost", res['mean_cost'], global_step)
                     writer.add_scalar(f"eval_per_stock/{stock_tag}/mean_native_cost", res['mean_native_cost'], global_step)
